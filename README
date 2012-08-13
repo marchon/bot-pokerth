@@ -1,4 +1,3 @@
-
 ABOUT
 =====
 I'm a bot poker programmer, and in order to test my bot, I needed a poker software. 
@@ -28,4 +27,5 @@ TODO
 ====
 - We should update the UI in order to choose the ia we want
 - cross compile windows binarie
+- bot sample code
 
