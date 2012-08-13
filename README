@@ -1,0 +1,31 @@
+
+ABOUT
+=====
+I'm a bot poker programmer, and in order to test my bot, I needed a poker software. 
+So I decided to use pokerth and patched it so that it can use "so library" as IA
+report bug to me: ramone.castillon@gmail.com
+website: http://code.google.com/p/bot-pokerth
+
+
+BUILD
+======
+run ./build.sh to build bot pokerth
+It will get pokerth source, and will apply bot-pokerth patches.
+
+I have tested it on linux debian testing 64 bits.
+To get all needed dependecies, just run apt-get build-dep pokterh
+
+RUNNING BOT-POKERTH
+==================
+just run pokerth !
+it run the same way as the official pokerth
+if you want to use your own bot (in ia library), then edit config_ia.cfg
+the first line of this will be the ia to use for the 1st computer opponement.
+the second line will be the 2nd computer opponement.
+If we cannot find the library, then it will use the default pokerth ia.
+
+TODO
+====
+- We should update the UI in order to choose the ia we want
+- cross compile windows binarie
+

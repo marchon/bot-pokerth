@@ -1,0 +1,22 @@
+Index: PokerTH-0.9.5-src/src/gui/qt/newgamedialog.ui
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/gui/qt/newgamedialog.ui	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/gui/qt/newgamedialog.ui	2012-08-13 13:07:43.620862300 +0200
+@@ -6,7 +6,7 @@
+    <rect>
+     <x>0</x>
+     <y>0</y>
+-    <width>225</width>
++    <width>263</width>
+     <height>271</height>
+    </rect>
+   </property>
+@@ -39,7 +39,7 @@
+          <number>10</number>
+         </property>
+         <property name="value">
+-         <number>10</number>
++         <number>2</number>
+         </property>
+        </widget>
+       </item>

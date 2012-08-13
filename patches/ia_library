@@ -1,0 +1,461 @@
+patch pokerth source to add bot ia from library
+
+Index: PokerTH-0.9.5-src/src/engine/local_engine/localplayer.cpp
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/local_engine/localplayer.cpp	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/local_engine/localplayer.cpp	2012-08-13 01:37:10.389593910 +0200
+@@ -1006,16 +1006,17 @@
+ 
+ void LocalPlayer::action()
+ {
+-
+ 	// 	int myOldCash = myCash;
+ 	// 	int oldHighestSet = currentHand->getCurrentBeRo()->getHighestSet();
+ 	// 	int oldMinimumRaise = currentHand->getCurrentBeRo()->getMinimumRaise();
+ 	// 	int myOldSet = mySet;
++	int useBot = useBotpokerth();
+ 
+ 	switch(currentHand->getCurrentRound()) {
+ 	case 0: {
+ 
+-		if(myConfig->readConfigInt("EngineVersion")) preflopEngine3();
++		if (useBot) botpthPreflopEngine();
++		else if(myConfig->readConfigInt("EngineVersion")) preflopEngine3();
+ 		else preflopEngine();
+ 
+ 		currentHand->getBoard()->collectSets();
+@@ -1025,7 +1026,8 @@
+ 	break;
+ 	case 1: {
+ 
+-		if(myConfig->readConfigInt("EngineVersion")) flopEngine3();
++		if (useBot) botpthFlopEngine();
++		else if(myConfig->readConfigInt("EngineVersion")) flopEngine3();
+ 		else flopEngine();
+ 
+ 		currentHand->getBoard()->collectSets();
+@@ -1035,7 +1037,8 @@
+ 	break;
+ 	case 2: {
+ 
+-		if(myConfig->readConfigInt("EngineVersion")) turnEngine3();
++		if (useBot) botpthTurnEngine();
++		else if(myConfig->readConfigInt("EngineVersion")) turnEngine3();
+ 		else turnEngine();
+ 
+ 		currentHand->getBoard()->collectSets();
+@@ -1045,7 +1048,8 @@
+ 	break;
+ 	case 3: {
+ 
+-		if(myConfig->readConfigInt("EngineVersion")) riverEngine3();
++		if (useBot) botpthRiverEngine();
++		else if(myConfig->readConfigInt("EngineVersion")) riverEngine3();
+ 		else riverEngine();
+ 
+ 		currentHand->getBoard()->collectSets();
+Index: PokerTH-0.9.5-src/src/engine/local_engine/localplayer.h
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/local_engine/localplayer.h	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/local_engine/localplayer.h	2012-08-13 03:27:03.001477501 +0200
+@@ -20,6 +20,7 @@
+ #define LOCALPLAYER_H
+ 
+ #include <playerinterface.h>
++#include "botpokerth_include/bot_loader.h"
+ 
+ #include <boost/shared_ptr.hpp>
+ #include <string>
+@@ -273,6 +274,17 @@
+ 	void turnEngine3();
+ 	void riverEngine3();
+ 
++	/* =========== bot-pokerth patches ========== */
++	int initBotPokerTH();
++	void destBotPokerTH();
++	int useBotpokerth();
++	void botpokerthProcessFrame(int round);
++	void botpthPreflopEngine();
++	void botpthFlopEngine();
++	void botpthTurnEngine();
++	void botpthRiverEngine();
++	/* ======== end of bot-pokerth patches ====== */
++
+ 	int flopCardsValue(int*);
+ 	int turnCardsValue(int*);
+ 
+Index: PokerTH-0.9.5-src/src/engine/local_engine/botpokerth.cpp
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ PokerTH-0.9.5-src/src/engine/local_engine/botpokerth.cpp	2012-08-13 12:32:34.228899549 +0200
+@@ -0,0 +1,274 @@
++/*****************************************************************************
++ * Bot-PokerTH - program your own poker bot                                  *
++ * Copyright (C) 2012 ramone de castillon. ramone.castillon@gmail.com        *
++ *                                                                           *
++ * This program is free software: you can redistribute it and/or modify      *
++ * it under the terms of the GNU Affero General Public License as            *
++ * published by the Free Software Foundation, either version 3 of the        *
++ * License, or (at your option) any later version.                           *
++ *                                                                           *
++ * This program is distributed in the hope that it will be useful,           *
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of            *
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the             *
++ * GNU Affero General Public License for more details.                       *
++ *                                                                           *
++ * You should have received a copy of the GNU Affero General Public License  *
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.     *
++ *****************************************************************************/
++
++#include "localplayer.h"
++#include <dlfcn.h>
++
++
++static char configIAFile[]="config_ia.cfg";
++static struct bot_intf bots[PB_MAX_NPLAYERS]={{NULL, NULL}};
++
++#define USE_IA_DLL 	1  /* use our dll ia */
++#define USE_IA_TO_CHECK 0  /* we don't know yet if we have to use our dll ia or not */
++#define USE_IA_DEFAULT  -1 /* use pokerth ia, not our own dll ia */
++static int __useIA[PB_MAX_NPLAYERS]={USE_IA_TO_CHECK}; 
++
++static char *dllNameToUse(int playerId)
++{
++	int id;
++	static char dll[PATH_MAX]="";
++	FILE *f=fopen(configIAFile,"r");
++
++	if (!f)
++		return NULL;
++	
++	id=0;
++	while(fgets(dll, sizeof(dll), f)) {
++		if (dll[0]=='#')
++			continue;
++		id++;
++		/* got it */
++		if (id == playerId)
++			break;
++	}
++
++	if (strlen(dll) > 1)
++		dll[strlen(dll)-1] = '\0';
++	fclose(f);
++	return dll;
++}
++
++int LocalPlayer::initBotPokerTH()
++{
++	int id = getMyUniqueID();
++
++	/* id = 0 for human player */
++	assert(id > 0 && id < PB_MAX_NPLAYERS);
++
++	char *dll = dllNameToUse(id);
++	if (!dll) {
++		goto error;
++	}
++
++	if (load_bot(dll, &bots[id])) {
++		goto error;
++	}
++
++	__useIA[id] = USE_IA_DLL;
++	return 0;
++
++error:
++	__useIA[id]=USE_IA_DEFAULT;
++	return -1;
++}
++
++void LocalPlayer::destBotPokerTH()
++{
++	int id;
++	for(id=0;id<PB_MAX_NPLAYERS;id++) {
++		unload_bot(&bots[id]);
++		__useIA[id] = 0;
++	}
++}
++
++int LocalPlayer::useBotpokerth()
++{
++	int id = getMyUniqueID();
++
++	if (__useIA[id] == USE_IA_DEFAULT)
++		return 0;
++	if (initBotPokerTH())
++		return 0;
++	return 1;
++}
++
++void LocalPlayer::botpokerthProcessFrame(int round)
++{
++	struct pb_frame frame;
++
++	assert(__useIA[getMyUniqueID()] == USE_IA_DLL);
++
++	memset(&frame, 0, sizeof(frame));
++	frame.pbot_version = PBOT_INTF_VERSION;
++	frame.betround = round;
++	frame.nplayers = currentHand->getSeatsList()->size();
++	frame.naplayers = currentHand->getActivePlayerList()->size();
++	//printf("ps = %d %d\n", currentHand->getSeatsList()->size(), currentHand->getActivePlayerList()->size());
++	frame.sblind = (double)currentHand->getSmallBlind();
++	frame.bblind = frame.sblind * 2; /* FIXME */
++	frame.userchair = getMyUniqueID();
++	frame.playeridturn = frame.userchair;
++	frame.dealerchair = currentHand->getDealerPosition();
++	frame.pot = currentHand->getBoard()->getPot();
++	frame.sets = currentHand->getBoard()->getSets();
++	frame.highestset = currentHand->getCurrentBeRo()->getHighestSet();
++	frame.call = currentHand->getCurrentBeRo()->getHighestSet() - getMySet();
++	//printf("pour highestset = %f %f\n", frame.highestset, frame.call);
++	if (frame.call < 0) frame.call = 0;
++	
++	struct pb_frame_player *p;
++	for(int i=0;i<PB_MAX_NPLAYERS;i++) {
++		p = &frame.players[i];
++		p->action = PB_ACT_NONE;
++		p->cards[0] = PB_CARD_NONE;
++		p->cards[1] = PB_CARD_NONE;
++		p->button = PB_BT_OUT;
++	}
++
++	PlayerListConstIterator it_c;
++	for(it_c=currentHand->getSeatsList()->begin(); it_c!=currentHand->getSeatsList()->end(); it_c++) {
++		if ((*it_c)->getMyActiveStatus()==0)
++			continue;
++
++		int id = (*it_c)->getMyUniqueID();
++		p = &frame.players[id];
++	
++		p->cash = (*it_c)->getMyCash();
++		p->set = (*it_c)->getMySet();
++		
++		int pcards[2];
++		(*it_c)->getMyCards(pcards);
++		p->cards[0] = (uint8_t)pcards[0];
++		p->cards[1] = (uint8_t)pcards[1];
++		
++		//printf("player %d cash %f %f", id,p->cash , p->set );
++		if (p->cash + p->set == 0) {
++			printf(" out\n");
++			p->button = PB_BT_OUT;
++			continue;
++		}
++		else
++			p->button = PB_BT_NONE;
++		printf("\n");
++
++		frame.sets+=(*it_c)->getMySet();
++
++		switch((*it_c)->getMyAction()) {
++		case PLAYER_ACTION_FOLD:
++			p->action = PB_ACT_FOLD;
++			break;
++		case PLAYER_ACTION_CHECK:
++			p->action = PB_ACT_CHECK;
++			break;
++		case PLAYER_ACTION_CALL:
++			p->action = PB_ACT_CALL;
++			break;
++		case PLAYER_ACTION_BET:
++			p->action = PB_ACT_BET;
++			break;
++		case PLAYER_ACTION_RAISE:
++			p->action = PB_ACT_RAISE;
++			break;
++		case PLAYER_ACTION_ALLIN:
++			p->action = PB_ACT_ALLIN;
++			break;
++		case PLAYER_ACTION_NONE:
++		default:
++			p->action = PB_ACT_NONE;
++		}
++	}
++
++	p = &frame.players[getMyUniqueID()];
++	assert(p->cards[0] == myCards[0]);
++	assert(p->cards[1] == myCards[1]);
++
++	/* button */
++	p = &frame.players[currentHand->getDealerPosition()];
++	p->button |= PB_BT_DEALER;
++	p = &frame.players[currentHand->getSBlindPosition()];
++	p->button |= PB_BT_SBLIND;
++	p = &frame.players[currentHand->getBBlindPosition()];
++	p->button |= PB_BT_BBLIND;
++	
++
++	int cards[5];
++	currentHand->getBoard()->getMyCards(cards);
++	for(int i=0;i<5;i++)
++		frame.cards[i] = (uint8_t)cards[i];
++
++	int dec = (int)bots[getMyUniqueID()].run(&frame);
++
++//	printf("%s round %d dec=%d\n", getMyName().c_str(), round, dec);
++
++	if (dec == PB_ACT_ALLIN){
++		mySet += myCash;
++		myCash = 0;
++		myAction = PLAYER_ACTION_ALLIN;
++		if (mySet > currentHand->getCurrentBeRo()->getHighestSet())
++			currentHand->getCurrentBeRo()->setHighestSet(mySet);
++		return;
++	}
++	else if (dec == PB_ACT_CALL) {
++		dec = currentHand->getCurrentBeRo()->getHighestSet() - mySet;
++	}
++
++	if (dec < 0) {
++		myAction = PLAYER_ACTION_FOLD;
++		return;
++	}
++
++	if (dec + mySet > currentHand->getCurrentBeRo()->getHighestSet()) {		
++		mySet += dec;
++		myCash = myCash - dec;
++		currentHand->getCurrentBeRo()->setHighestSet(mySet);
++		myAction = PLAYER_ACTION_RAISE;
++		return;
++	}
++	
++	if (dec + mySet < currentHand->getCurrentBeRo()->getHighestSet()) {
++		myAction = PLAYER_ACTION_FOLD;
++		return;
++	}
++
++	if (dec == 0 && mySet == currentHand->getCurrentBeRo()->getHighestSet()) {
++		myAction = PLAYER_ACTION_CHECK;
++		return;
++	}
++
++	if (dec + mySet == currentHand->getCurrentBeRo()->getHighestSet()) {
++		mySet += dec;
++		myCash = myCash - dec;
++		myAction = PLAYER_ACTION_CALL;
++		return;
++	}
++
++	myAction = PLAYER_ACTION_FOLD;
++	//evaluation(bet, raise);
++}
++
++void LocalPlayer::botpthPreflopEngine()
++{
++	botpokerthProcessFrame(PB_RD_PREFLOP);
++}
++
++void LocalPlayer::botpthFlopEngine()
++{
++	botpokerthProcessFrame(PB_RD_FLOP);
++}
++
++void LocalPlayer::botpthTurnEngine()
++{
++	botpokerthProcessFrame(PB_RD_TURN);
++}
++
++void LocalPlayer::botpthRiverEngine()
++{
++	botpokerthProcessFrame(PB_RD_RIVER);
++}
++
++
+Index: PokerTH-0.9.5-src/pokerth_lib.pro
+===================================================================
+--- PokerTH-0.9.5-src.orig/pokerth_lib.pro	2012-06-21 22:54:48.000000000 +0200
++++ PokerTH-0.9.5-src/pokerth_lib.pro	2012-08-13 01:37:10.393593910 +0200
+@@ -151,6 +151,7 @@
+ 		src/engine/local_engine/localenginefactory.cpp \
+ 		src/engine/local_engine/localhand.cpp \
+ 		src/engine/local_engine/localplayer.cpp \
++		src/engine/local_engine/botpokerth.cpp \
+ 		src/engine/local_engine/localberopreflop.cpp \
+ 		src/engine/local_engine/localberoflop.cpp \
+ 		src/engine/local_engine/localberoturn.cpp \
+Index: PokerTH-0.9.5-src/src/engine/network_engine/clienthand.cpp
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/network_engine/clienthand.cpp	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/network_engine/clienthand.cpp	2012-08-13 01:37:10.393593910 +0200
+@@ -237,6 +237,18 @@
+ 	return dealerPosition;
+ }
+ 
++int
++ClientHand::getSBlindPosition() const
++{
++	boost::recursive_mutex::scoped_lock lock(m_syncMutex);
++	return smallBlindPosition;
++}
++int
++ClientHand::getBBlindPosition() const
++{
++	boost::recursive_mutex::scoped_lock lock(m_syncMutex);
++	return bigBlindPosition;
++}
+ void
+ ClientHand::setSmallBlind(int theValue)
+ {
+Index: PokerTH-0.9.5-src/config_ia.cfg
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ PokerTH-0.9.5-src/config_ia.cfg	2012-08-13 13:10:09.120859733 +0200
+@@ -0,0 +1,4 @@
++# first ia: librandom.so or random.dll
++./libiarandom.so
++# all other ia will be the default ia of pokerth
++
+Index: PokerTH-0.9.5-src/src/engine/handinterface.h
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/handinterface.h	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/handinterface.h	2012-08-13 01:37:10.393593910 +0200
+@@ -58,6 +58,8 @@
+ 
+ 	virtual void setDealerPosition(int theValue) =0;
+ 	virtual int getDealerPosition() const =0;
++	virtual int getSBlindPosition() const =0;
++	virtual int getBBlindPosition() const =0;
+ 
+ 	virtual void setSmallBlind(int theValue) =0;
+ 	virtual int getSmallBlind() const =0;
+Index: PokerTH-0.9.5-src/src/engine/local_engine/localhand.h
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/local_engine/localhand.h	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/local_engine/localhand.h	2012-08-13 01:37:10.393593910 +0200
+@@ -113,6 +113,12 @@
+ 		return smallBlind;
+ 	}
+ 
++	int getSBlindPosition() const { 
++		return smallBlindPosition; 
++	}
++	int getBBlindPosition() const { 
++		return bigBlindPosition; 
++	}
+ 	void setAllInCondition(bool theValue) {
+ 		allInCondition = theValue;
+ 	}
+Index: PokerTH-0.9.5-src/src/engine/network_engine/clienthand.h
+===================================================================
+--- PokerTH-0.9.5-src.orig/src/engine/network_engine/clienthand.h	2012-06-21 22:54:49.000000000 +0200
++++ PokerTH-0.9.5-src/src/engine/network_engine/clienthand.h	2012-08-13 01:37:10.393593910 +0200
+@@ -69,6 +69,8 @@
+ 
+ 	void setDealerPosition ( int theValue );
+ 	int getDealerPosition() const;
++	int getSBlindPosition() const;
++	int getBBlindPosition() const;
+ 
+ 	void setSmallBlind ( int theValue );
+ 	int getSmallBlind() const;
+@@ -116,6 +118,8 @@
+ 	int myID;
+ 	int startQuantityPlayers;
+ 	unsigned dealerPosition;
++    unsigned smallBlindPosition;
++    unsigned bigBlindPosition;
+ 	GameState currentRound;
+ 	GameState roundBeforePostRiver;
+ 	int smallBlind;
