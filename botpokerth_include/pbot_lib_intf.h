@@ -19,6 +19,8 @@
 #ifndef __PBOT_LIB_INTF_H__
 #define __PBOT_LIB_INTF_H__
 
+#include <stdint.h>
+
 #define PBOT_INTF_VERSION 1  /* version of this file. to be checked  wen receiving pb_fram struct */
 #define PB_MAX_NPLAYERS 10   /* maximum number of players */
 #define PB_NB_HANDS 	1326
@@ -45,50 +47,51 @@
 #define PB_BT_OUT    16
 
 /* round name */
-#define PB_RD_UNDEF		0
-#define PB_RD_PREFLOP	1
-#define PB_RD_FLOP		2
-#define PB_RD_TURN		3
-#define PB_RD_RIVER		4
-#define PB_RD_END		5
+#define PB_RD_UNDEF   0
+#define PB_RD_PREFLOP 1
+#define PB_RD_FLOP    2
+#define PB_RD_TURN    3
+#define PB_RD_RIVER   4
+#define PB_RD_END     5
 
 struct pb_frame_player{
-	double cash;
-	double set;
-	int8_t action;
-	int8_t button;
-#define FL_PLAYER_AGRP 1	/*aggressive player */
+	double cash;		/* player cash */
+	double set;		/* */
+	int8_t action;		/* action like PB_ACT_FOLD */
+	int8_t button;		/* PB_BT_SBLIND etc ... */
+#define FL_PLAYER_AGRP 1	/* aggressive player. FIXME: remove me*/
 #define FL_PLAYER_AGRF 2
 #define FL_PLAYER_AGRT 4
 #define FL_PLAYER_AGRR 8
 #define FL_PLAYER_AGR_AFTERFLOP (FL_PLAYER_AGRF|FL_PLAYER_AGRT|FL_PLAYER_AGRR)
-	int16_t flags;
-	uint8_t id;
-	uint8_t _pad;
-	uint8_t cards[2];
+	int16_t flags;		/* private flags to use with your bot */
+	uint8_t id;		/* player uniq id from 0 to 9 */
+	uint8_t _pad;		
+	uint8_t cards[2];	/* player cards. see cards format below */
 #define MAX_STR_NAME 32
-	char name[MAX_STR_NAME];
+	char name[MAX_STR_NAME];/* player name */
 	struct pb_frame_player *next;
 }__attribute__((packed));
 
 typedef struct pb_frame_player pb_player;
 
 struct pb_frame {
-	uint8_t pbot_version;
+	uint8_t pbot_version;	/* check that this value equal to PBOT_INTF_VERSION */
 	uint8_t nplayers;	/* number of players */
 	uint8_t naplayers;	/* number of active players */
 //	int ismyturn;
-	uint8_t playeridturn;
-	uint8_t userchair;
-	uint8_t dealerchair;
-	uint8_t betround;
-	uint8_t betround_turn;
-	double pot;
-	double sets;
-	double sblind;
-	double bblind;
-	double ante;
-	double highestset;
+	uint8_t playeridturn;	/* id of the player whose it's his turn */
+	uint8_t userchair;	/* your id number */
+	uint8_t dealerchair;	/* id of the dealer */
+	uint8_t betround;	/* PB_RD_PREFLOP, etc ... */
+	uint8_t betround_turn;	/* when someone raise, we have play an another turn 
+				   and betround_turn is increased */
+	double pot;		/* pot value */
+	double sets;		/* */
+	double sblind;		/* small blind value */
+	double bblind;		/* */
+	double ante;		/* ante value */
+	double highestset;	/* */
 	double call; 		/*amount to call */
 
 	uint8_t cards[5];	/* board cards */
@@ -97,6 +100,21 @@ struct pb_frame {
 	struct pb_frame_player players[PB_MAX_NPLAYERS];
 }__attribute__((packed));
 
+/* every bot IA dll have a pb_process_frame function whose
+ * the type is defined as LPPROCESSFRAME
+ * this is the function which will be called ever when it
+ * your turn to play */
 typedef double (*LPPROCESSFRAME)(struct pb_frame *frame);
+
+
+/* cards format:
+ * the number is defined as uint8_t and can be between 0 to 51.
+ * PB_CARD_NONE is a special number, used when we don't know the card
+ * 
+ * to get the card color and the card value from the number, you have
+ * compute it like this;
+ * card_color = card/13; (0=diamond, 1=heart, 2=spade, 3=club)
+ * card_value = card%13; (0=card num°2, ..., 10=jack, ... 13=As) 
+ */
 
 #endif /* __PBV4_H__ */
