@@ -40,7 +40,7 @@ static int is_good_hand(uint8_t cards[2])
 	uint8_t c2 = card_value(cards[1]);
 
 	/* pair with at least {8,8} and up to {As,As} */
-	if (c1 == c2 && c1 == 7) {
+	if (c1 == c2 && c1 >= 7) {
 		return 1;
 	}
 	/* both cards are at least Jack */
